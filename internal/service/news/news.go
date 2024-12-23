@@ -7,26 +7,29 @@ import (
 	"strconv"
 	"stugi/api-gateway/internal/model"
 	. "stugi/api-gateway/internal/model"
+	"stugi/api-gateway/internal/service/comments"
 )
 
 type Service interface {
 	GetNews(pageStr, pageSizeStr string) ([]*NewsShortDetailed, error)
-	FilterNews(pageStr, pageSizeStr string, filter string) ([]*NewsShortDetailed, error)
+	FilterNews(pageStr, pageSizeStr, filter string) ([]*NewsShortDetailed, error)
 	GetNewsDetailed(id string) (*NewsFullDetailed, error)
 }
 
 type NewsService struct {
-	apiBaseURL string
+	apiBaseURL      string
+	serviceComments *comments.CommentsService
 }
 
 // Конструктор для создания нового экземпляра NewsService
-func New(apiBaseURL string) *NewsService {
+func New(apiBaseURL string, serviceComments *comments.CommentsService) *NewsService {
 	return &NewsService{
-		apiBaseURL: apiBaseURL,
+		apiBaseURL:      apiBaseURL,
+		serviceComments: serviceComments,
 	}
 }
 
-func (s *NewsService) GetNews(pageStr, pageSizeStr string) ([]*NewsShortDetailed, map[string]any) {
+func (s *NewsService) GetNews(pageStr, pageSizeStr string) ([]*NewsShortDetailed, error) {
 	// Формируем URL для запроса к внешнему сервису
 	url := fmt.Sprintf("%s/news", s.apiBaseURL)
 
@@ -45,45 +48,38 @@ func (s *NewsService) GetNews(pageStr, pageSizeStr string) ([]*NewsShortDetailed
 	// Отправляем запрос к внешнему сервису
 	resp, err := http.Get(url)
 	if err != nil {
-		return nil, map[string]any{"error": "Unable to fetch news"}
+		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var newsResponse struct {
-		News       []*NewsShortDetailed `json:"news"`
-		Pagination map[string]any       `json:"pagination"`
+	var news []*NewsShortDetailed
+
+	if err := json.NewDecoder(resp.Body).Decode(&news); err != nil {
+		return nil, err
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&newsResponse); err != nil {
-		return nil, map[string]any{"error": "Unable to decode response"}
-	}
-
-	return newsResponse.News, newsResponse.Pagination
+	return news, nil
 }
 
-func (s *NewsService) FilterNews(pageStr, pageSizeStr string, filter string) ([]*model.NewsShortDetailed, map[string]any) {
+func (s *NewsService) FilterNews(pageStr, pageSizeStr, filter string) ([]*model.NewsShortDetailed, error) {
 	// Формируем URL для фильтрации новостей с учетом пагинации
 	url := fmt.Sprintf("%s/news/filter?s=%s&page=%s&pageSize=%s", s.apiBaseURL, filter, pageStr, pageSizeStr)
 
 	// Отправляем запрос к внешнему сервису
 	resp, err := http.Get(url)
 	if err != nil {
-		return nil, map[string]any{"error": "Unable to fetch filtered news"}
+		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var newsResponse struct {
-		News       []*model.NewsShortDetailed `json:"news"`
-		Pagination map[string]any             `json:"pagination"`
-	}
+	var news []*NewsShortDetailed
 
 	// Декодируем ответ
-	if err := json.NewDecoder(resp.Body).Decode(&newsResponse); err != nil {
-		return nil, map[string]any{"error": "Unable to decode response"}
+	if err := json.NewDecoder(resp.Body).Decode(&news); err != nil {
+		return nil, err
 	}
 
-	// Возвращаем новости с пагинацией
-	return newsResponse.News, newsResponse.Pagination
+	return news, nil
 }
 
 func (s *NewsService) GetNewsDetailed(id string) (*NewsFullDetailed, error) {
@@ -97,10 +93,17 @@ func (s *NewsService) GetNewsDetailed(id string) (*NewsFullDetailed, error) {
 	}
 	defer resp.Body.Close()
 
-	var newsDetails model.NewsFullDetailed
+	var newsDetails NewsFullDetailed
 	if err := json.NewDecoder(resp.Body).Decode(&newsDetails); err != nil {
 		return nil, fmt.Errorf("unable to decode response: %w", err)
 	}
+
+	// Добавляем комментарии к новости
+	comments, err := s.serviceComments.GetCommentsByNewsID(id)
+	if err != nil {
+		return nil, fmt.Errorf("unable to fetch comments: %w", err)
+	}
+	newsDetails.Comments = &comments
 
 	return &newsDetails, nil
 }
