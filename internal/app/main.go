@@ -76,7 +76,7 @@ func (a *app) postComment(c *gin.Context) {
 
 // Дополнительная функция для пагинации
 func getPaginatedNews(service srvNews.Service, search, pageStr, pageSizeStr string) ([]*model.NewsShortDetailed, map[string]any) {
-	news, err := service.FilterNews(search)
+	news, err := service.FilterNews(pageStr, pageSizeStr, search)
 	if err != nil {
 		return nil, nil
 	}
